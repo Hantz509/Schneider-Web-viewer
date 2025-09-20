@@ -15,6 +15,6 @@
     },
     "local": {
         "$comment": "Required props if source is set to 'local'.",
-        "server": "127.0.0.1"
+        "server": "192.168.210.46"
     }
 }

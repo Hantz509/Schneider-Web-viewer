@@ -11,12 +11,12 @@
  */
 import React from 'react';
 import './App.css';
-import AppStream from './AppStream'; // Ensure .tsx extension if needed
+import AppStream from './AppStream';
 import StreamConfig from '../stream.config.json';
 import USDAsset from "./USDAsset";
 import USDStage from "./USDStage";
+import PIDataPanel from "./PIDataPanel"; // New component for PI data display
 import { headerHeight } from './App';
-
 
 interface USDAssetType {
     name: string;
@@ -27,6 +27,21 @@ interface USDPrimType {
     name?: string;
     path: string;
     children?: USDPrimType[];
+}
+
+// PI Data interfaces
+interface PIDataValue {
+    name: string;
+    value: number | string;
+    unit: string;
+    timestamp: string;
+}
+
+interface PIDataState {
+    values: PIDataValue[];
+    isLoading: boolean;
+    error: string | null;
+    lastUpdated: string | null;
 }
 
 export interface AppProps {
@@ -49,7 +64,11 @@ interface AppState {
     showStream: boolean;
     showUI: boolean;
     isLoading: boolean;
-    loadingText: string; 
+    loadingText: string;
+    // PI Data related state
+    piData: PIDataState;
+    showPiPanel: boolean;
+    selectedObjectPath: string;
 }
 
 interface AppStreamMessageType {
@@ -60,18 +79,18 @@ interface AppStreamMessageType {
 export default class App extends React.Component<AppProps, AppState> {
     
     private usdStageRef = React.createRef<USDStage>();
-    // private _streamConfig: StreamConfigType = getConfig();
     
     constructor(props: AppProps) {
         super(props);
         
-        // list of selectable USD assets
         const usdAssets: USDAssetType[] = StreamConfig.source === "stream"? [
-            {name: "Sample 1", url:"/app/samples/stage01.usd"},
-            {name: "Sample 2", url:"/app/samples/stage02.usd"},
+            {name: "MEP_Schneider", url: "C:/web-viewer-sample/public/samples/MEP_Schneider/MEP_Schneider/MEP_Schneider.usd"},
+            {name: "Sample 1", url:"${omni.usd_viewer.samples}/samples_data/stage01.usd"},
+            {name: "Sample 2", url:"${omni.usd_viewer.samples}/samples_data/stage02.usd"},
         ]
         :
         [
+            {name: "MEP_Schneider", url: "C:/web-viewer-sample/public/samples/MEP_Schneider/MEP_Schneider/MEP_Schneider.usd"},
             {name: "Sample 1", url:"./samples/stage01.usd"},
             {name: "Sample 2", url:"./samples/stage02.usd"},
         ];
@@ -85,7 +104,200 @@ export default class App extends React.Component<AppProps, AppState> {
             showStream: false,
             showUI: false,
             loadingText: StreamConfig.source === "gfn" ? "Log in to GeForce NOW to view stream" : (StreamConfig.source === "stream" ? "Waiting for stream to initialize":  "Waiting for stream to begin"),
-            isLoading: StreamConfig.source === "stream" ? true : false
+            isLoading: StreamConfig.source === "stream" ? true : false,
+            // PI Data state
+            piData: {
+                values: [],
+                isLoading: false,
+                error: null,
+                lastUpdated: null
+            },
+            showPiPanel: false,
+            selectedObjectPath: ""
+        }
+    }
+
+    /**
+     * PI Web API Configuration
+     */
+    private readonly PI_CONFIG = {
+    // Using local proxy server to avoid CORS issues
+    attributesUrl: "http://localhost:3001/api/pi/attributes",
+    valueUrlBase: "http://localhost:3001/api/pi/value/"
+};
+
+    /**
+     * Mapping of PI attribute names to display information
+     */
+    private readonly PI_ATTRIBUTE_MAP = {
+        "temperature": { label: "Temp 01", unit: "°C" },
+        "TemperatureSetpoint": { label: "Temp 02", unit: "°C" },
+        "PowerUsage": { label: "Temp 03", unit: "°C" },
+        "Current": { label: "Temp 04", unit: "°C" },
+        "internalCalculOutput": { label: "Temp 05", unit: "" },
+        "temp_06": { label: "Temp 06", unit: "°C" },
+        "temp_07": { label: "Temp 07", unit: "°C" },
+        "temp_08": { label: "Temp 08", unit: "°C" },
+        "temp_09": { label: "Temp 09", unit: "°C" },
+        "temp_10": { label: "Temp 10", unit: "°C" },
+        "temp_11": { label: "Temp 11", unit: "°C" }
+    };
+
+    /**
+     * Fetch PI data from the PI Web API via proxy server
+     */
+    private async _fetchPIData(): Promise<void> {
+        console.log('*** FETCHING REAL PI DATA VIA PROXY ***');
+        
+        this.setState(prevState => ({
+            piData: {
+                ...prevState.piData,
+                isLoading: true,
+                error: null
+            }
+        }));
+
+        try {
+            console.log('Making request to proxy server:', this.PI_CONFIG.attributesUrl);
+            
+            // Fetch attributes from proxy server
+            const attributesResponse = await fetch(this.PI_CONFIG.attributesUrl, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!attributesResponse.ok) {
+                throw new Error(`Proxy server error: ${attributesResponse.status} ${attributesResponse.statusText}`);
+            }
+
+            const attributesData = await attributesResponse.json();
+            console.log('PI Attributes received from proxy:', attributesData);
+            
+            const attributes = attributesData.Items || [];
+
+            // Create a map of attribute names to WebIds
+            const attributeMap = attributes.reduce((map: any, attr: any) => {
+                map[attr.Name] = attr.WebId;
+                return map;
+            }, {});
+
+            console.log('Available PI attributes:', Object.keys(attributeMap));
+
+            // Fetch values for each attribute we're interested in
+            const piValues: PIDataValue[] = [];
+            const timestamp = new Date().toLocaleString();
+
+            for (const [attrName, config] of Object.entries(this.PI_ATTRIBUTE_MAP)) {
+                if (attributeMap[attrName]) {
+                    try {
+                        console.log(`Fetching value for ${attrName} via proxy...`);
+                        const valueResponse = await fetch(
+                            `${this.PI_CONFIG.valueUrlBase}${encodeURIComponent(attributeMap[attrName])}`,
+                            {
+                                method: 'GET',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                }
+                            }
+                        );
+
+                        if (valueResponse.ok) {
+                            const valueData = await valueResponse.json();
+                            console.log(`${attrName} value from proxy:`, valueData);
+                            
+                            piValues.push({
+                                name: config.label,
+                                value: typeof valueData.Value === 'number' ? 
+                                       Math.round(valueData.Value * 100) / 100 : 
+                                       valueData.Value,
+                                unit: config.unit,
+                                timestamp: valueData.Timestamp || timestamp
+                            });
+                        } else {
+                            console.warn(`Failed to fetch value for ${attrName}: ${valueResponse.status}`);
+                            piValues.push({
+                                name: config.label,
+                                value: "Error",
+                                unit: config.unit,
+                                timestamp: timestamp
+                            });
+                        }
+                    } catch (error) {
+                        console.error(`Error fetching value for ${attrName}:`, error);
+                        piValues.push({
+                            name: config.label,
+                            value: "N/A",
+                            unit: config.unit,
+                            timestamp: timestamp
+                        });
+                    }
+                } else {
+                    console.warn(`Attribute ${attrName} not found in PI system`);
+                    piValues.push({
+                        name: config.label,
+                        value: "Not Found",
+                        unit: config.unit,
+                        timestamp: timestamp
+                    });
+                }
+            }
+
+            console.log('*** REAL PI DATA FETCHED VIA PROXY ***', piValues);
+
+            this.setState(prevState => ({
+                piData: {
+                    values: piValues,
+                    isLoading: false,
+                    error: null,
+                    lastUpdated: timestamp
+                }
+            }));
+
+        } catch (error) {
+            console.error('PI Data fetch error via proxy:', error);
+            
+            // Create fallback test data if real data fails
+            const piValues: PIDataValue[] = [];
+            const timestamp = new Date().toLocaleString();
+
+            for (const [attrName, config] of Object.entries(this.PI_ATTRIBUTE_MAP)) {
+                piValues.push({
+                    name: config.label,
+                    value: "Connection Failed",
+                    unit: config.unit,
+                    timestamp: timestamp
+                });
+            }
+
+            this.setState(prevState => ({
+                piData: {
+                    values: piValues,
+                    isLoading: false,
+                    error: `Failed to connect to PI Web API via proxy: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                    lastUpdated: timestamp
+                }
+            }));
+        }
+    }
+
+    /**
+     * Handle closing the PI data panel
+     */
+    private _closePIPanel = (): void => {
+        this.setState({ 
+            showPiPanel: false,
+            selectedObjectPath: ""
+        });
+    }
+
+    /**
+     * Handle refresh PI data
+     */
+    private _refreshPIData = (): void => {
+        if (this.state.showPiPanel) {
+            this._fetchPIData();
         }
     }
 
@@ -382,16 +594,36 @@ export default class App extends React.Component<AppProps, AppState> {
             
         // Notification from Kit about user changing the selection via the viewport.
         else if (event.event_type === "stageSelectionChanged") {
-            console.log(event.payload.prims.constructor.name);
+            console.log('Selection changed:', event.payload.prims);
+            
             if (!Array.isArray(event.payload.prims) || event.payload.prims.length === 0) {
                 console.log('Kit App communicates an empty stage selection.');
-                this.setState({ selectedUSDPrims: new Set<USDPrimType>() });
+                this.setState({ 
+                    selectedUSDPrims: new Set<USDPrimType>(),
+                    showPiPanel: false,
+                    selectedObjectPath: ""
+                });
             }
             else {
-                console.log('Kit App communicates selection of a USDPrimType: ' + event.payload.prims.map((obj: any) => obj).join(', '));
+                console.log('Kit App communicates selection of objects:', event.payload.prims);
+                const selectedPath = event.payload.prims[0]; // Get first selected object path
+                
+                // DEBUG: Log all clicked paths to find the door
+                console.log('*** CLICKED OBJECT PATH: ***', selectedPath);
+                console.log('*** LOOKING FOR: /World/P5D_panel/Shell/Geometry/P5D_0/Door ***');
+                
+                // TEST: Show PI panel for ANY clicked object
+                console.log('*** OBJECT CLICKED! Showing PI data panel... ***');
+                this.setState({ 
+                    selectedObjectPath: selectedPath,
+                    showPiPanel: true
+                });
+                this._fetchPIData();
+                
+                // Update the normal USD selection UI
                 const usdPrimsToSelect: Set<USDPrimType> = new Set<USDPrimType>();
-                event.payload.prims.forEach((obj: any) => {
-                    const result = this._findUSDPrimByPath(obj);
+                event.payload.prims.forEach((objPath: string) => {
+                    const result = this._findUSDPrimByPath(objPath);
                     if (result !== null) {
                         usdPrimsToSelect.add(result);
                     }
@@ -442,8 +674,9 @@ export default class App extends React.Component<AppProps, AppState> {
     }
     
     render() {
-
         const sidebarWidth = 300;
+        const piPanelWidth = 350;
+        
         return (
             <div
                 style={{
@@ -456,7 +689,7 @@ export default class App extends React.Component<AppProps, AppState> {
                 <div style={{
                             position: 'absolute',
                             height: `calc(100% - ${headerHeight}px)`,
-                            width: `calc(100% - ${sidebarWidth}px)`
+                            width: `calc(100% - ${sidebarWidth}px - ${this.state.showPiPanel ? piPanelWidth : 0}px)`
                 }}>
                     
                 {/* Loading text indicator */}
@@ -491,7 +724,6 @@ export default class App extends React.Component<AppProps, AppState> {
 
                 {this.state.showUI &&
                 <>
-                        
                     {/* USD Asset Selector */}
                     <USDAsset
                         usdAssets={this.state.usdAssets}
@@ -509,8 +741,19 @@ export default class App extends React.Component<AppProps, AppState> {
                         fillUSDPrim={(value) => this._onFillUSDPrim(value)}
                         onReset={() => this._onStageReset()}
                         />
-                    </>
+                </>
                 }
+
+                {/* PI Data Panel */}
+                {this.state.showPiPanel && (
+                    <PIDataPanel
+                        width={piPanelWidth}
+                        piData={this.state.piData}
+                        onClose={this._closePIPanel}
+                        onRefresh={this._refreshPIData}
+                        selectedObjectPath={this.state.selectedObjectPath}
+                    />
+                )}
             </div>
             );
         }
