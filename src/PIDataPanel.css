@@ -22,7 +22,7 @@
 
 /* Header */
 .pi-data-header {
-    background-color: #76b900; /* NVIDIA green */
+    background-color: #3DCD58; /* NVIDIA green */
     color: #ffffff;
     padding: 15px 20px;
     display: flex;
@@ -73,7 +73,7 @@
 
 .pi-object-path {
     font-size: 14px;
-    color: #76b900;
+    color: #3DCD58;
     font-weight: bold;
 }
 
@@ -88,7 +88,7 @@
 }
 
 .pi-refresh-button {
-    background-color: #76b900;
+    background-color: #3DCD58;
     color: #ffffff;
     border: none;
     padding: 8px 16px;

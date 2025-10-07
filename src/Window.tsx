@@ -11,13 +11,14 @@
  */
 import React from 'react';
 import './App.css';
-import AppStream from './AppStream';
+import AppStream from './AppStream'; // Ensure .tsx extension if needed
 import StreamConfig from '../stream.config.json';
 import USDAsset from "./USDAsset";
 import USDStage from "./USDStage";
-import PIDataPanel from "./PIDataPanel"; // New component for PI data display
+import PIDataPanel from "./PIDataPanel"; // Import PI Data Panel
 import { headerHeight } from './App';
 
+ 
 interface USDAssetType {
     name: string;
     url: string;
@@ -64,7 +65,8 @@ interface AppState {
     showStream: boolean;
     showUI: boolean;
     isLoading: boolean;
-    loadingText: string;
+    loadingText: string; 
+    selectedCamera: string;
     // PI Data related state
     piData: PIDataState;
     showPiPanel: boolean;
@@ -76,6 +78,82 @@ interface AppStreamMessageType {
     payload: any;
 }
 
+// Camera Selector Component - UPDATED WITH FREE CAMERA
+interface CameraSelectorProps {
+    visible: boolean;
+    onCameraSelect: (cameraPath: string) => void;
+    selectedCamera: string;
+}
+
+interface CameraSelectorState {
+    selectedCamera: string;
+}
+
+class CameraSelector extends React.Component<CameraSelectorProps, CameraSelectorState> {
+    private cameras = [
+        { name: "Free Camera", path: "" }, // NEW: Free navigation mode
+        { name: "P5A", path: "/World/MEP____/Cameras/P5A" },
+        { name: "P5B", path: "/World/MEP____/Cameras/P5B" },
+        { name: "P5C", path: "/World/MEP____/Cameras/P5C" },
+        { name: "P5D", path: "/World/MEP____/Cameras/P5D" }
+    ];
+
+    constructor(props: CameraSelectorProps) {
+        super(props);
+        this.state = {
+            selectedCamera: props.selectedCamera || this.cameras[0].path
+        };
+    }
+
+    componentDidUpdate(prevProps: CameraSelectorProps) {
+        if (prevProps.selectedCamera !== this.props.selectedCamera) {
+            this.setState({ selectedCamera: this.props.selectedCamera });
+        }
+    }
+
+    handleCameraChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+        const selectedPath = event.target.value;
+        this.setState({ selectedCamera: selectedPath });
+        
+        if (selectedPath === "") {
+            // Free camera mode - send special message
+            this.props.onCameraSelect("FREE_CAMERA");
+        } else {
+            // Fixed camera mode
+            this.props.onCameraSelect(selectedPath);
+        }
+    };
+
+    render() {
+        if (!this.props.visible) return null;
+
+        return (
+            <div className="camera-selector-container" style={{ 
+                position: 'absolute', 
+                top: '10px', 
+                right: '320px', 
+                zIndex: 1000,
+                backgroundColor: 'rgba(0,0,0,0.8)',
+                padding: '10px',
+                borderRadius: '5px'
+            }}>
+                <label style={{ color: 'white', marginRight: '10px' }}>Camera View:</label>
+                <select 
+                    className="nvidia-dropdown"
+                    value={this.state.selectedCamera}
+                    onChange={this.handleCameraChange}
+                >
+                    {this.cameras.map(camera => (
+                        <option key={camera.path || "free"} value={camera.path}>
+                            {camera.name}
+                        </option>
+                    ))}
+                </select>
+            </div>
+        );
+    }
+}
+
 export default class App extends React.Component<AppProps, AppState> {
     
     private usdStageRef = React.createRef<USDStage>();
@@ -83,16 +161,15 @@ export default class App extends React.Component<AppProps, AppState> {
     constructor(props: AppProps) {
         super(props);
         
+        // list of selectable USD assets - UPDATED WITH MEP_SCHNEIDER
         const usdAssets: USDAssetType[] = StreamConfig.source === "stream"? [
-            {name: "MEP_Schneider", url: "C:/web-viewer-sample/public/samples/MEP_Schneider/MEP_Schneider/MEP_Schneider.usd"},
-            {name: "Sample 1", url:"${omni.usd_viewer.samples}/samples_data/stage01.usd"},
-            {name: "Sample 2", url:"${omni.usd_viewer.samples}/samples_data/stage02.usd"},
+            
+            {name: "MEP_Schneider", url: "C:/web-viewer-sample/public/samples/MEP_Schneider/MEP_Schneider/MEP_Schneider.usd"}
         ]
         :
         [
-            {name: "MEP_Schneider", url: "C:/web-viewer-sample/public/samples/MEP_Schneider/MEP_Schneider/MEP_Schneider.usd"},
-            {name: "Sample 1", url:"./samples/stage01.usd"},
-            {name: "Sample 2", url:"./samples/stage02.usd"},
+           
+            {name: "MEP_Schneider", url: "./samples/MEP_Schneider/MEP_Schneider/MEP_Schneider.usd"}
         ];
 
         this.state = {
@@ -105,6 +182,7 @@ export default class App extends React.Component<AppProps, AppState> {
             showUI: false,
             loadingText: StreamConfig.source === "gfn" ? "Log in to GeForce NOW to view stream" : (StreamConfig.source === "stream" ? "Waiting for stream to initialize":  "Waiting for stream to begin"),
             isLoading: StreamConfig.source === "stream" ? true : false,
+            selectedCamera: "", // UPDATED: Start with free camera mode
             // PI Data state
             piData: {
                 values: [],
@@ -121,10 +199,10 @@ export default class App extends React.Component<AppProps, AppState> {
      * PI Web API Configuration
      */
     private readonly PI_CONFIG = {
-    // Using local proxy server to avoid CORS issues
-    attributesUrl: "http://localhost:3001/api/pi/attributes",
-    valueUrlBase: "http://localhost:3001/api/pi/value/"
-};
+        // Using local proxy server to avoid CORS issues
+        attributesUrl: "http://localhost:3001/api/pi/attributes",
+        valueUrlBase: "http://localhost:3001/api/pi/value/"
+    };
 
     /**
      * Mapping of PI attribute names to display information
@@ -302,6 +380,19 @@ export default class App extends React.Component<AppProps, AppState> {
     }
 
     /**
+     * Check if currently in one of the P5 camera views
+     */
+    private _isInP5CameraView(): boolean {
+        const p5Cameras = [
+            "/World/MEP____/Cameras/P5A",
+            "/World/MEP____/Cameras/P5B", 
+            "/World/MEP____/Cameras/P5C",
+            "/World/MEP____/Cameras/P5D"
+        ];
+        return p5Cameras.includes(this.state.selectedCamera);
+    }
+
+    /**
     * @function _queryLoadingState
     *
     * Sends Kit a message to find out what the loading state is.
@@ -443,14 +534,58 @@ export default class App extends React.Component<AppProps, AppState> {
     }
 
     /**
+     * @function _switchCamera
+     * 
+     * UPDATED: Send a request to switch to a specific camera view or free camera
+     */
+    private _switchCamera(cameraPath: string): void {
+        console.log(`Switching to camera: ${cameraPath}`);
+        this.setState({ selectedCamera: cameraPath === "FREE_CAMERA" ? "" : cameraPath });
+        const message: AppStreamMessageType = {
+            event_type: "switchCameraRequest",
+            payload: {
+                camera_path: cameraPath
+            }
+        };
+        AppStream.sendMessage(JSON.stringify(message));
+    }
+
+    /**
+     * @function _isMEPSchneiderAsset
+     * 
+     * Check if the currently selected asset is the MEP_Schneider file
+     */
+    private _isMEPSchneiderAsset(): boolean {
+        return this.state.selectedUSDAsset?.name === "MEP_Schneider";
+    }
+
+    /**
     * @function _onSelectUSDPrims
     *
     * React to user selecting items in the USDStage list.
-    * Sends a request to change the selection in the USD Stage.
+    * For MEP_Schneider, handle camera switching when cameras are selected.
     */
     private _onSelectUSDPrims (selectedUsdPrims: Set<USDPrimType>): void {
-        console.log(`Sending request to select: ${selectedUsdPrims}.`);
+        console.log(`Sending request to select: ${Array.from(selectedUsdPrims).map(p => p.path)}`);
         this.setState({ selectedUSDPrims: selectedUsdPrims });
+        
+        // Check if this is MEP_Schneider and if a camera was selected
+        if (this._isMEPSchneiderAsset() && selectedUsdPrims.size === 1) {
+            const selectedPrim = Array.from(selectedUsdPrims)[0];
+            const cameraNames = ['P5A', 'P5B', 'P5C', 'P5D'];
+            
+            // Check if the selected prim is one of our cameras
+            if (cameraNames.some(name => selectedPrim.path.includes(name))) {
+                // Extract camera name and switch to it
+                const cameraName = cameraNames.find(name => selectedPrim.path.includes(name));
+                if (cameraName) {
+                    this._switchCamera(`/World/MEP____/Cameras/${cameraName}`);
+                    return; // Don't send the regular selection message for cameras
+                }
+            }
+        }
+        
+        // Regular selection logic for non-camera prims
         const paths: string[] = Array.from(selectedUsdPrims).map(obj => obj.path);
         const message: AppStreamMessageType = {
             event_type: "selectPrimsRequest",
@@ -608,17 +743,24 @@ export default class App extends React.Component<AppProps, AppState> {
                 console.log('Kit App communicates selection of objects:', event.payload.prims);
                 const selectedPath = event.payload.prims[0]; // Get first selected object path
                 
-                // DEBUG: Log all clicked paths to find the door
+                // DEBUG: Log all clicked paths
                 console.log('*** CLICKED OBJECT PATH: ***', selectedPath);
-                console.log('*** LOOKING FOR: /World/P5D_panel/Shell/Geometry/P5D_0/Door ***');
                 
-                // TEST: Show PI panel for ANY clicked object
-                console.log('*** OBJECT CLICKED! Showing PI data panel... ***');
-                this.setState({ 
-                    selectedObjectPath: selectedPath,
-                    showPiPanel: true
-                });
-                this._fetchPIData();
+                // Check if we're in a P5 camera view AND the MEP_Schneider asset is loaded
+                if (this._isMEPSchneiderAsset() && this._isInP5CameraView()) {
+                    console.log('*** OBJECT CLICKED IN P5 CAMERA VIEW! Showing PI data panel... ***');
+                    this.setState({ 
+                        selectedObjectPath: selectedPath,
+                        showPiPanel: true
+                    });
+                    this._fetchPIData();
+                } else {
+                    // Hide PI panel if not in P5 camera view or not MEP_Schneider
+                    this.setState({ 
+                        showPiPanel: false,
+                        selectedObjectPath: ""
+                    });
+                }
                 
                 // Update the normal USD selection UI
                 const usdPrimsToSelect: Set<USDPrimType> = new Set<USDPrimType>();
@@ -646,6 +788,20 @@ export default class App extends React.Component<AppProps, AppState> {
             }
             if (Array.isArray(children)){
                 this._makePickable(children);
+            }
+        }
+        // Camera switching response - UPDATED
+        else if (event.event_type === "switchCameraResponse") {
+            if (event.payload.result === "success") {
+                console.log(`Successfully switched to camera: ${event.payload.camera_path}`);
+                // Update UI state to reflect camera change
+                if (event.payload.camera_path === "FREE_CAMERA") {
+                    this.setState({ selectedCamera: "" });
+                } else {
+                    this.setState({ selectedCamera: event.payload.camera_path });
+                }
+            } else {
+                console.error(`Failed to switch camera: ${event.payload.error}`);
             }
         }
         // other messages from app to kit
@@ -700,6 +856,15 @@ export default class App extends React.Component<AppProps, AppState> {
                     </div>
                 }
 
+                {/* Camera Selector for MEP_Schneider - UPDATED */}
+                {this._isMEPSchneiderAsset() && this.state.showUI && (
+                    <CameraSelector
+                        visible={this.state.showStream}
+                        onCameraSelect={(cameraPath) => this._switchCamera(cameraPath)}
+                        selectedCamera={this.state.selectedCamera}
+                    />
+                )}
+
                 {/* Streamed app */}
                 <AppStream
                     sessionId={this.props.sessionId}
@@ -724,6 +889,7 @@ export default class App extends React.Component<AppProps, AppState> {
 
                 {this.state.showUI &&
                 <>
+                        
                     {/* USD Asset Selector */}
                     <USDAsset
                         usdAssets={this.state.usdAssets}
@@ -741,7 +907,7 @@ export default class App extends React.Component<AppProps, AppState> {
                         fillUSDPrim={(value) => this._onFillUSDPrim(value)}
                         onReset={() => this._onStageReset()}
                         />
-                </>
+                    </>
                 }
 
                 {/* PI Data Panel */}
