@@ -65,7 +65,7 @@ npm -v
 3. Clone this repository:
 
 ```bash
-git clone https://github.com/NVIDIA-Omniverse/web-viewer-sample.git
+https://github.com/Hantz509/Schneider-Web-viewer.git
 ```
 
 4. Navigate into the project:
@@ -167,18 +167,6 @@ D: Right
 Q: Down
 E: Up
 Scroll Wheel: Adjust speed
-
-
-
-
-
-### Embed Viewer in an Existing Client
-
-To embed the viewer in your existing client you'll need to add the 
-`omniverse-webrtc-streaming-library` as a dependency to your project:
-
- - Refer to [.npmrc](.npmrc).
- - Refer to [package.json](package.json) `dependencies` section.
 
 
 
