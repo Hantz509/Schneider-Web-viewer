@@ -64,7 +64,7 @@ function makePIRequest(path) {
 app.get('/api/pi/attributes', async (req, res) => {
     try {
         console.log('Fetching PI attributes...');
-        const path = '/piwebapi/elements/F1EmQmqOHC3i_kyP3ytLaQ6cSACt0PThFj8BGgrwAMKdv39AV0lOLUxRSu4wOUk3Ukc0XERBVEFCQVNFMVXA5BY2AXONGT-awo-apnzE/attributes';
+        const path = '/piwebapi/elements/F1EmQmqOHC3i_kyP3ytLaQ6cSACt0PThFj8BGgrwAMKdv39AV0lOLUxRSu4wOUk3Ukc...../attributes';
         const data = await makePIRequest(path);
         console.log('PI attributes fetched successfully');
         res.json(data);
