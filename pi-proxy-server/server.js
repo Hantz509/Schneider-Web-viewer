@@ -13,8 +13,8 @@ app.use(express.json());
 const PI_CONFIG = {
     host: '192.168.74.128',
     port: 443,
-    username: 'win-lqin09i7rg4\\administrator',
-    password: 'Brungy509@'
+    username: '',
+    password: ''
 };
 
 // Create basic auth header
